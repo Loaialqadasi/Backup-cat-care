@@ -1,0 +1,81 @@
+import { Request, Response, NextFunction } from 'express';
+import { AuthenticationError, AuthorizationError, NotFoundError } from '../Mohamed_Abdelgawwad-CCU-S1-04-Foundation/errors.js';
+import { success } from '../Mohamed_Abdelgawwad-CCU-S1-04-Foundation/response.js';
+import { emergenciesService } from './emergencies.service.js';
+import { CreateEmergencyInput, EmergencyListQuery, UpdateEmergencyStatusInput } from './emergencies.types.js';
+
+export const emergenciesController = {
+  async create(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) {
+        throw new AuthenticationError('Missing or invalid token');
+      }
+      const payload = req.body as Omit<CreateEmergencyInput, 'reportedByUserId'>;
+      const report = await emergenciesService.createEmergency({
+        ...payload,
+        reportedByUserId: req.user.id
+      });
+      success(res, report, 201);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async list(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const query = req.query as unknown as EmergencyListQuery;
+      const result = await emergenciesService.listEmergencies(query);
+      success(res, result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const id = Number(req.params.id);
+      const report = await emergenciesService.getEmergencyById(id);
+      success(res, report);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // the priority feed — most urgent stuff first, no auth needed so anyone can see it
+  async priorityFeed(_req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const items = await emergenciesService.listPriorityFeed();
+      success(res, items);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async updateStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) {
+        throw new AuthenticationError('Missing or invalid token');
+      }
+
+      // H-2 fix: only admin or volunteer roles (or the original reporter) can change status
+      const id = Number(req.params.id);
+      const emergency = await emergenciesService.getEmergencyById(id);
+      if (!emergency) {
+        throw new NotFoundError('Emergency report not found');
+      }
+
+      const isReporter = emergency.reportedByUserId === req.user.id;
+      const isAdminOrVolunteer = req.user.role === 'admin' || req.user.role === 'volunteer';
+
+      if (!isAdminOrVolunteer && !isReporter) {
+        throw new AuthorizationError('Only admins, volunteers, or the original reporter can change emergency status');
+      }
+
+      const payload = req.body as UpdateEmergencyStatusInput;
+      const report = await emergenciesService.updateStatus(id, payload.status);
+      success(res, report);
+    } catch (error) {
+      next(error);
+    }
+  }
+};
